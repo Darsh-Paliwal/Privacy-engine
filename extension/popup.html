@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browser Agent</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <span class="icon">🤖</span>
+        <span class="title">Browser Agent</span>
+      </div>
+      <span class="badge">Phase 4C-3</span>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button id="tabScan" class="tab-btn active">🔍 Perception & Agent</button>
+      <button id="tabPrivacy" class="tab-btn">🔐 Privacy</button>
+      <button id="tabProfile" class="tab-btn">👤 Profile</button>
+    </nav>
+
+    <!-- TAB 1: PERCEPTION & AGENT -->
+    <main id="viewScan" class="tab-content active">
+      <!-- Run Browser Agent Card -->
+      <section class="section card">
+        <div class="section-title">🤖 Autonomous Browser Agent Task</div>
+        <div class="agent-form">
+          <input type="text" id="inputAgentTask" class="task-input" value="Fill this application using my profile" placeholder="Describe agent task...">
+          <button id="btnRunAgent" class="btn btn-action btn-block">
+            🤖 Run Autonomous Agent
+          </button>
+        </div>
+
+        <!-- Activity Log -->
+        <div id="boxActivityLog" class="activity-box hidden">
+          <div class="activity-title">Activity Log</div>
+          <div id="agentActivityLog" class="activity-list"></div>
+        </div>
+
+        <!-- Action Plan Display -->
+        <div id="boxActionPlan" class="plan-box hidden">
+          <div class="plan-header">
+            <span>📋 Action Plan History</span>
+            <span class="display-badge">Phase 4C-3</span>
+          </div>
+          <div id="agentActionPlan" class="plan-list"></div>
+          <button id="btnExecutePlan" class="btn btn-primary btn-block" style="margin-top: 8px;">
+            ▶ Execute Action Plan
+          </button>
+        </div>
+      </section>
+
+      <section class="section">
+        <button id="btnScan" class="btn btn-primary btn-block">
+          🔍 Scan Current Page
+        </button>
+      </section>
+
+      <!-- Summary Counters -->
+      <section class="section card">
+        <div class="section-title">Detected Elements</div>
+        <div class="metrics-grid">
+          <div class="metric">
+            <span class="metric-value" id="valInputs">0</span>
+            <span class="metric-label">Inputs</span>
+          </div>
+          <div class="metric">
+            <span class="metric-value" id="valButtons">0</span>
+            <span class="metric-label">Buttons</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Detected Inputs List -->
+      <section class="section card">
+        <div class="section-title">Detected Inputs</div>
+        <div id="listInputs" class="item-list">
+          <span class="empty-text">No inputs scanned yet.</span>
+        </div>
+      </section>
+
+      <!-- Detected Buttons List -->
+      <section class="section card">
+        <div class="section-title">Detected Buttons</div>
+        <div id="listButtons" class="item-list">
+          <span class="empty-text">No buttons scanned yet.</span>
+        </div>
+      </section>
+
+      <!-- Testing Controls -->
+      <section class="section card">
+        <div class="section-title">Testing Controls</div>
+        <div class="button-group">
+          <button id="btnFill" class="btn btn-secondary btn-block">
+            📝 Test Auto-Fill (Local Profile)
+          </button>
+          <button id="btnNext" class="btn btn-secondary btn-block">
+            ➡️ Test Click Next
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <!-- TAB 2: PRIVACY ENGINE -->
+    <main id="viewPrivacy" class="tab-content">
+      <section class="section">
+        <div class="button-group">
+          <button id="btnPrivacyScan" class="btn btn-primary btn-block">
+            🔐 Privacy Scan Page
+          </button>
+          <button id="btnPreviewSanitized" class="btn btn-secondary btn-block">
+            👁 Preview Sanitized Context
+          </button>
+        </div>
+      </section>
+
+      <!-- Privacy Audit Card -->
+      <section class="section card">
+        <div class="section-title">🔐 Privacy Audit Summary</div>
+        <div class="audit-grid">
+          <div class="audit-row">
+            <span class="audit-label">Sensitive Fields:</span>
+            <span id="auditSensitiveCount" class="audit-value highlight">0</span>
+          </div>
+          <div class="audit-row">
+            <span class="audit-label">Cloud Transmission:</span>
+            <span class="audit-value status-off">SANITIZED CONTEXT ONLY</span>
+          </div>
+          <div class="audit-row">
+            <span class="audit-label">Private Profile Data:</span>
+            <span class="audit-value status-on">LOCAL ONLY</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Classified Fields List -->
+      <section class="section card">
+        <div class="section-title">DOM Privacy Classifications</div>
+        <div id="listPrivacyFields" class="item-list">
+          <span class="empty-text">Click "Privacy Scan Page" to inspect classifications.</span>
+        </div>
+      </section>
+
+      <!-- Sanitized Preview Container -->
+      <section id="boxSanitized" class="section card hidden">
+        <div class="section-title">Sanitized Context (Cloud-Facing)</div>
+        <div class="security-note">
+          <span class="lock-icon">🔒</span> Actual values (email/phone/name) are replaced with semantic placeholders.
+        </div>
+        <pre id="codeSanitized" class="code-preview"></pre>
+      </section>
+    </main>
+
+    <!-- TAB 3: LOCAL PROFILE -->
+    <main id="viewProfile" class="tab-content">
+      <section class="section card">
+        <div class="section-title">Local Profile Storage</div>
+        <div class="security-badge">
+          🔒 Stored locally in this browser
+        </div>
+
+        <form id="formProfile" class="profile-form">
+          <div class="form-field">
+            <label for="profName">Full Name</label>
+            <input type="text" id="profName" placeholder="Full Name">
+          </div>
+
+          <div class="form-field">
+            <label for="profEmail">Email</label>
+            <input type="email" id="profEmail" placeholder="Email Address">
+          </div>
+
+          <div class="form-field">
+            <label for="profPhone">Phone</label>
+            <input type="text" id="profPhone" placeholder="Phone Number">
+          </div>
+
+          <div class="form-field">
+            <label for="profCollege">College</label>
+            <input type="text" id="profCollege" placeholder="College / University">
+          </div>
+
+          <div class="form-field">
+            <label for="profAddress">Address</label>
+            <input type="text" id="profAddress" placeholder="Address">
+          </div>
+
+          <button type="submit" id="btnSaveProfile" class="btn btn-primary btn-block">
+            💾 Save Profile
+          </button>
+        </form>
+      </section>
+    </main>
+
+    <!-- Status Bar -->
+    <footer class="status-bar">
+      <div class="status-title">Status:</div>
+      <div id="statusText" class="status-message info">Ready</div>
+    </footer>
+  </div>
+
+  <script src="privacy.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

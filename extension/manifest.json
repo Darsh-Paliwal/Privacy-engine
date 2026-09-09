@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Browser Agent - Perception & Control",
+  "version": "1.0.0",
+  "description": "DOM perception, browser control, privacy engine & autonomous loop for lightweight browser agent (SIH 26171 Phase 4C-3)",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Browser Agent"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>",
+        "file://*/*",
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "privacy.js",
+        "content.js"
+      ],
+      "run_at": "document_end"
+    }
+  ]
+}
