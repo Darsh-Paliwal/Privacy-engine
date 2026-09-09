@@ -789,6 +789,76 @@ document.addEventListener('DOMContentLoaded', () => {
   btnPrivacyScan.addEventListener('click', handlePrivacyScan);
   btnPreviewSanitized.addEventListener('click', handlePreviewSanitized);
 
+  // =========================================================================
+  // PHASE 5A: LOCAL SCREENSHOT CAPTURE
+  // =========================================================================
+  const btnCaptureScreen = document.getElementById('btnCaptureScreen');
+  const boxScreenshotPreview = document.getElementById('boxScreenshotPreview');
+  const imgScreenshot = document.getElementById('imgScreenshot');
+  const valDimensions = document.getElementById('valDimensions');
+  const valScreenshotStatus = document.getElementById('valScreenshotStatus');
+
+  async function handleCaptureScreen() {
+    setStatus('Capturing local screenshot...', 'info');
+
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tabs || tabs.length === 0) {
+        throw new Error('No active browser tab found.');
+      }
+
+      const activeTab = tabs[0];
+      if (activeTab.url && (activeTab.url.startsWith('chrome://') || activeTab.url.startsWith('edge://') || activeTab.url.startsWith('about:'))) {
+        throw new Error('Extension cannot capture browser system pages.');
+      }
+
+      chrome.tabs.captureVisibleTab(activeTab.windowId, { format: 'jpeg', quality: 90 }, (dataUrl) => {
+        if (chrome.runtime.lastError) {
+          const errMsg = chrome.runtime.lastError.message || 'Screenshot capture failed.';
+          console.error('[Phase 5A Capture Error]', errMsg);
+          setStatus(`Screenshot error: ${errMsg}`, 'error');
+          logActivity(`Screenshot capture failed: ${errMsg}`, 'error');
+          return;
+        }
+
+        if (!dataUrl) {
+          setStatus('Screenshot failed: Empty data URL returned.', 'error');
+          logActivity('Screenshot capture returned empty data.', 'error');
+          return;
+        }
+
+        const img = new Image();
+        img.onload = () => {
+          const width = img.naturalWidth || img.width;
+          const height = img.naturalHeight || img.height;
+
+          imgScreenshot.src = dataUrl;
+          valDimensions.textContent = `${width} × ${height}`;
+          valScreenshotStatus.textContent = 'Captured locally';
+          boxScreenshotPreview.classList.remove('hidden');
+
+          setStatus(`✓ Screenshot captured locally (${width} × ${height} px).`, 'success');
+          logActivity(`Screenshot captured locally (${width} × ${height} px).`, 'success');
+        };
+
+        img.onerror = () => {
+          setStatus('Failed to process captured screenshot preview.', 'error');
+          logActivity('Failed to process captured screenshot preview.', 'error');
+        };
+
+        img.src = dataUrl;
+      });
+    } catch (err) {
+      console.error('[Phase 5A Error]', err);
+      setStatus(`Screenshot error: ${err.message}`, 'error');
+      logActivity(`Screenshot error: ${err.message}`, 'error');
+    }
+  }
+
+  if (btnCaptureScreen) {
+    btnCaptureScreen.addEventListener('click', handleCaptureScreen);
+  }
+
   // Initialize
   populateProfileForm();
   handleScanPage();

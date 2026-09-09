@@ -104,6 +104,24 @@
           </button>
         </div>
       </section>
+
+      <!-- PHASE 5A: LOCAL SCREENSHOT CAPTURE -->
+      <section class="section card">
+        <div class="section-title">📸 Local Screen Capture</div>
+        <button id="btnCaptureScreen" class="btn btn-secondary btn-block">
+          📸 Capture Screen
+        </button>
+        <div id="boxScreenshotPreview" class="screenshot-box hidden" style="margin-top: 8px;">
+          <div class="section-title" style="font-size: 10px; margin-bottom: 4px;">Screenshot Preview</div>
+          <div class="screenshot-img-container">
+            <img id="imgScreenshot" src="" alt="Captured Screenshot" class="screenshot-img" />
+          </div>
+          <div class="screenshot-meta" style="margin-top: 6px; font-size: 10px; display: flex; justify-content: space-between; color: var(--text-muted);">
+            <span>Dimensions: <strong id="valDimensions" style="color: var(--accent-blue);">0 × 0</strong></span>
+            <span>Status: <strong id="valScreenshotStatus" style="color: var(--accent-emerald);">Captured locally</strong></span>
+          </div>
+        </div>
+      </section>
     </main>
 
     <!-- TAB 2: PRIVACY ENGINE -->
