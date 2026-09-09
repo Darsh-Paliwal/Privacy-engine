@@ -1461,6 +1461,193 @@ document.addEventListener('DOMContentLoaded', () => {
     btnRunUnifiedPerception.addEventListener('click', runUnifiedPerception);
   }
 
+  // =========================================================================
+  // PHASE 6B: INTELLIGENT PERCEPTION ROUTER
+  // =========================================================================
+
+  /**
+   * Phase 6B: Deterministic Intelligent Perception Router
+   * Evaluates DOM perception signals, user task language, and failure flags to decide
+   * whether DOM_ONLY perception is sufficient or DOM_PLUS_VISION is required.
+   *
+   * @param {Object} domData - Raw or sanitized DOM perception payload
+   * @param {string} task - User prompt / task description
+   * @param {Object} [options] - Options object (e.g. { previousPerceptionFailed: boolean })
+   * @returns {Object} Structured perception mode decision & generic routing signals
+   */
+  function decidePerceptionMode(domData, task, options = {}) {
+    const cleanTask = typeof task === 'string' ? task.trim() : '';
+    const opts = options || {};
+
+    // 1. Task-based Visual Signal Detection (Deterministic keyword & pattern matching)
+    const VISUAL_KEYWORDS = [
+      'look at',
+      'visually',
+      'visual',
+      'screenshot',
+      'image',
+      'icon',
+      'red button',
+      'blue button',
+      'highlighted',
+      'highlight',
+      'color',
+      'coloured',
+      'shown',
+      'pictured',
+      'appearance',
+      'which card',
+      'find the picture'
+    ];
+
+    const lowerTask = cleanTask.toLowerCase();
+    const taskRequiresVisual = VISUAL_KEYWORDS.some(kw => lowerTask.includes(kw));
+
+    // 2. Extract Generic DOM Perception Signals
+    const inputs = (domData && Array.isArray(domData.inputs))
+      ? domData.inputs
+      : (domData && Array.isArray(domData.fields) ? domData.fields : []);
+    const rawButtons = (domData && Array.isArray(domData.buttons)) ? domData.buttons : [];
+
+    const inputCount = (domData && typeof domData.totalInputs === 'number')
+      ? domData.totalInputs
+      : inputs.length;
+    const linkCount = (domData && domData.counts && typeof domData.counts.links === 'number')
+      ? domData.counts.links
+      : rawButtons.filter(b => b.type === 'link').length;
+    const buttonCount = (domData && domData.counts && typeof domData.counts.buttons === 'number')
+      ? domData.counts.buttons
+      : rawButtons.filter(b => b.type !== 'link').length;
+
+    const interactiveElementCount = inputCount + buttonCount + linkCount;
+
+    const hasCanvas = Boolean(domData && domData.hasCanvas);
+    const hasShadowDom = Boolean(domData && domData.hasShadowDom);
+    const customElementCount = (domData && typeof domData.customElementCount === 'number') ? domData.customElementCount : 0;
+    const textDensity = (domData && typeof domData.textDensity === 'number') ? domData.textDensity : 0;
+    const previousPerceptionFailed = Boolean(opts.previousPerceptionFailed);
+
+    const signals = {
+      interactiveElementCount: interactiveElementCount,
+      inputCount: inputCount,
+      buttonCount: buttonCount,
+      linkCount: linkCount,
+      hasCanvas: hasCanvas,
+      hasShadowDom: hasShadowDom,
+      customElementCount: customElementCount,
+      textDensity: textDensity,
+      taskRequiresVisual: taskRequiresVisual,
+      previousPerceptionFailed: previousPerceptionFailed
+    };
+
+    // 3. Routing Decision Logic (Deterministic Priority)
+    let mode = "DOM_ONLY";
+    let useVisual = false;
+    let reason = "";
+
+    if (taskRequiresVisual) {
+      mode = "DOM_PLUS_VISION";
+      useVisual = true;
+      reason = "Task explicitly requires visual understanding.";
+    } else if (previousPerceptionFailed) {
+      mode = "DOM_PLUS_VISION";
+      useVisual = true;
+      reason = "Previous DOM perception failed to resolve the requested target.";
+    } else if (hasCanvas) {
+      mode = "DOM_PLUS_VISION";
+      useVisual = true;
+      reason = "Canvas-based content may not be represented reliably in the DOM.";
+    } else if (interactiveElementCount === 0 && textDensity > 0.2) {
+      mode = "DOM_PLUS_VISION";
+      useVisual = true;
+      reason = "Page has low interactive DOM element exposure despite substantial content.";
+    } else {
+      mode = "DOM_ONLY";
+      useVisual = false;
+      reason = "DOM provides sufficient structured interactive elements for this task.";
+    }
+
+    return {
+      mode: mode,
+      useVisual: useVisual,
+      reason: reason,
+      signals: signals
+    };
+  }
+
+  // Expose globally on window for modular reuse / external callers
+  window.decidePerceptionMode = decidePerceptionMode;
+
+  // Phase 6B Test UI DOM Elements
+  const btnDecideRouter = document.getElementById('btnDecideRouter');
+  const chkPrevFailed = document.getElementById('chkPrevFailed');
+  const boxRouterResult = document.getElementById('boxRouterResult');
+  const valRouterMode = document.getElementById('valRouterMode');
+  const valRouterReason = document.getElementById('valRouterReason');
+  const valSigInteractive = document.getElementById('valSigInteractive');
+  const valSigInputs = document.getElementById('valSigInputs');
+  const valSigButtons = document.getElementById('valSigButtons');
+  const valSigLinks = document.getElementById('valSigLinks');
+  const valSigCanvas = document.getElementById('valSigCanvas');
+  const valSigShadow = document.getElementById('valSigShadow');
+  const valSigCustom = document.getElementById('valSigCustom');
+  const valSigDensity = document.getElementById('valSigDensity');
+  const valSigTaskVisual = document.getElementById('valSigTaskVisual');
+  const valSigPrevFailed = document.getElementById('valSigPrevFailed');
+
+  async function handleDecidePerceptionMode() {
+    setStatus('Evaluating Perception Router decision...', 'info');
+
+    // 1. Query active tab scan
+    const scanRes = await sendMessageToActiveTab({ type: 'SCAN_PAGE' });
+    if (!scanRes || !scanRes.success) {
+      setStatus('Perception Router failed: Unable to scan page DOM.', 'error');
+      return;
+    }
+
+    // 2. Read task prompt from existing task input if available
+    const taskText = inputAgentTask ? inputAgentTask.value.trim() : '';
+
+    // 3. Read previous perception failure simulation flag
+    const previousFailed = chkPrevFailed ? chkPrevFailed.checked : false;
+
+    // 4. Run deterministic perception router logic (No VLM model load, no screenshot, no backend request)
+    const decision = decidePerceptionMode(scanRes, taskText, { previousPerceptionFailed: previousFailed });
+
+    // 5. Update Phase 6B Router Test UI
+    if (valRouterMode) {
+      valRouterMode.textContent = decision.mode === 'DOM_PLUS_VISION' ? 'DOM + LOCAL VISION' : 'DOM ONLY';
+      valRouterMode.className = decision.mode === 'DOM_PLUS_VISION'
+        ? 'privacy-tag sensitive'
+        : 'privacy-tag non-sensitive';
+    }
+
+    if (valRouterReason) {
+      valRouterReason.textContent = decision.reason;
+    }
+
+    const s = decision.signals;
+    if (valSigInteractive) valSigInteractive.textContent = String(s.interactiveElementCount);
+    if (valSigInputs) valSigInputs.textContent = String(s.inputCount);
+    if (valSigButtons) valSigButtons.textContent = String(s.buttonCount);
+    if (valSigLinks) valSigLinks.textContent = String(s.linkCount);
+    if (valSigCanvas) valSigCanvas.textContent = s.hasCanvas ? 'Yes' : 'No';
+    if (valSigShadow) valSigShadow.textContent = s.hasShadowDom ? 'Yes' : 'No';
+    if (valSigCustom) valSigCustom.textContent = String(s.customElementCount);
+    if (valSigDensity) valSigDensity.textContent = String(s.textDensity);
+    if (valSigTaskVisual) valSigTaskVisual.textContent = s.taskRequiresVisual ? 'Yes' : 'No';
+    if (valSigPrevFailed) valSigPrevFailed.textContent = s.previousPerceptionFailed ? 'Yes' : 'No';
+
+    if (boxRouterResult) boxRouterResult.classList.remove('hidden');
+
+    setStatus(`✓ Router Decision: ${decision.mode} (${decision.useVisual ? 'Vision Needed' : 'DOM Only'})`, 'success');
+    logActivity(`Router Decision: ${decision.mode} | Reason: "${decision.reason}" | TaskVisual: ${s.taskRequiresVisual}, PrevFailed: ${s.previousPerceptionFailed}, Canvas: ${s.hasCanvas}.`, 'success');
+  }
+
+  if (btnDecideRouter) {
+    btnDecideRouter.addEventListener('click', handleDecidePerceptionMode);
+  }
+
   // Initialize
   populateProfileForm();
   handleScanPage();

@@ -224,6 +224,46 @@
           </details>
         </div>
       </section>
+
+      <!-- PHASE 6B: INTELLIGENT PERCEPTION ROUTER -->
+      <section class="section card">
+        <div class="section-title">🧭 Intelligent Perception Router</div>
+        <div style="margin-bottom: 8px;">
+          <label style="font-size: 10px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="checkbox" id="chkPrevFailed">
+            <span>Simulate Previous Perception Failure</span>
+          </label>
+        </div>
+        <button id="btnDecideRouter" class="btn btn-action btn-block">
+          🧭 Decide Perception Mode
+        </button>
+
+        <div id="boxRouterResult" class="router-box hidden" style="margin-top: 8px;">
+          <div class="router-mode-banner" style="display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; border-radius: 4px; margin-bottom: 6px; background: var(--bg-primary); border: 1px solid var(--border-color);">
+            <span style="font-size: 10px; color: var(--text-muted);">Selected Mode:</span>
+            <strong id="valRouterMode" class="privacy-tag non-sensitive" style="font-size: 11px;">DOM ONLY</strong>
+          </div>
+
+          <div class="section-title" style="font-size: 10px; margin-bottom: 4px;">Routing Reason:</div>
+          <div id="valRouterReason" style="background: #090d16; color: var(--text-main); font-size: 10px; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--border-color); margin-bottom: 6px; line-height: 1.4;">
+            --
+          </div>
+
+          <div class="section-title" style="font-size: 10px; margin-bottom: 4px;">Extracted Perception Signals:</div>
+          <div class="router-signals-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 10px; background: var(--bg-primary); padding: 6px; border-radius: 4px; border: 1px solid var(--border-color);">
+            <div>Interactive elements: <strong id="valSigInteractive" style="color: var(--accent-indigo);">0</strong></div>
+            <div>Inputs: <strong id="valSigInputs" style="color: var(--accent-blue);">0</strong></div>
+            <div>Buttons: <strong id="valSigButtons" style="color: var(--accent-emerald);">0</strong></div>
+            <div>Links: <strong id="valSigLinks" style="color: var(--accent-amber);">0</strong></div>
+            <div>Canvas: <strong id="valSigCanvas">No</strong></div>
+            <div>Shadow DOM: <strong id="valSigShadow">No</strong></div>
+            <div>Custom elements: <strong id="valSigCustom">0</strong></div>
+            <div>Text density: <strong id="valSigDensity">0.00</strong></div>
+            <div>Task requires visual: <strong id="valSigTaskVisual">No</strong></div>
+            <div>Prev perception failed: <strong id="valSigPrevFailed">No</strong></div>
+          </div>
+        </div>
+      </section>
     </main>
 
     <!-- TAB 2: PRIVACY ENGINE -->

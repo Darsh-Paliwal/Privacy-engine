@@ -236,6 +236,27 @@
 
     console.log(`[Agent] Found ${detectedInputs.length} inputs and ${detectedButtons.length} buttons.`);
 
+    // Page-based signal extraction for Perception Router
+    const hasCanvas = document.getElementsByTagName('canvas').length > 0;
+
+    let hasShadow = false;
+    let customCount = 0;
+    const allElements = document.getElementsByTagName('*');
+    for (let i = 0; i < allElements.length; i++) {
+      const el = allElements[i];
+      if (el.shadowRoot) {
+        hasShadow = true;
+      }
+      if (el.tagName && el.tagName.includes('-')) {
+        customCount++;
+      }
+    }
+
+    // Text density calculation (normalized 0 to 1)
+    const rawText = document.body ? (document.body.innerText || '') : '';
+    const textLength = rawText.replace(/\s+/g, ' ').trim().length;
+    const textDensity = Math.min(1.0, Math.round((textLength / 5000) * 1000) / 1000);
+
     return {
       success: true,
       url: window.location.href,
@@ -248,7 +269,11 @@
       totalInputs: detectedInputs.length,
       totalButtons: detectedButtons.length,
       inputs: detectedInputs,
-      buttons: detectedButtons
+      buttons: detectedButtons,
+      hasCanvas: hasCanvas,
+      hasShadowDom: hasShadow,
+      customElementCount: customCount,
+      textDensity: textDensity
     };
   }
 
