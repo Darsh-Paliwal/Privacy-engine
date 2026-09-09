@@ -338,10 +338,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
   // 5. PHASE 4C-3: AUTONOMOUS AGENT LOOP
   // =========================================================================
+  // =========================================================================
+  // 5. PHASE 4C-3 / PHASE 7: HYBRID AUTONOMOUS AGENT LOOP
+  // =========================================================================
   async function runAutonomousAgentLoop(taskText) {
     const MAX_ITERATIONS = 10;
     let iteration = 0;
     let previousStateSig = '';
+    let previousPerceptionFailed = false;
 
     // Reset UI Areas & State
     lastValidatedPlan = [];
@@ -378,6 +382,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!scanRes || !scanRes.success) {
         logActivity('Could not connect to page DOM.', 'error');
         setStatus('Agent stopped: Unable to scan page DOM.', 'error');
+        previousPerceptionFailed = true;
         break;
       }
 
@@ -387,10 +392,72 @@ document.addEventListener('DOMContentLoaded', () => {
       const currentPageUrl = scanRes.url || '';
       logActivity(`Perceived ${scanRes.totalInputs} input(s), ${scanRes.totalButtons} button(s) on ${scanRes.title || 'page'}.`);
 
-      // STEP 2: Apply Local Privacy Protection
-      const sanitizedContext = AgentPrivacyEngine.sanitizePageData(scanRes);
+      // STEP 2: Intelligent Perception Router (Phase 7 Hybrid Integration)
+      const t0Route = performance.now();
+      const routingDecision = decidePerceptionMode(scanRes, taskText, { previousPerceptionFailed });
+      const routingMs = Math.round(performance.now() - t0Route);
 
-      // STEP 3: Request Reasoning from FastAPI / Qwen3.8-Flash
+      logActivity(`Perception route: ${routingDecision.mode} — ${routingDecision.reason}`, routingDecision.mode === 'DOM_PLUS_VISION' ? 'warn' : 'info');
+
+      // STEP 3: Build Sanitized Context & Execute Visual Perception if Needed
+      const sanitizedContext = AgentPrivacyEngine.sanitizePageData(scanRes);
+      let visualInferenceMs = 0;
+      let visualResultMeta = { available: false };
+
+      if (routingDecision.mode === 'DOM_PLUS_VISION') {
+        let screenshotDataUrl = '';
+        try {
+          screenshotDataUrl = await handleCaptureScreen();
+        } catch (err) {
+          logActivity(`Visual perception warning: Screenshot capture failed: ${err.message}`, 'warn');
+        }
+
+        if (screenshotDataUrl && !screenshotDataUrl.startsWith('about:blank')) {
+          try {
+            logActivity('Executing local SmolVLM vision inference...', 'info');
+            const infRes = await executeLocalVisionInference(screenshotDataUrl);
+            visualInferenceMs = infRes.inferenceMs;
+            const sanitizedDesc = sanitizeVisualDescriptionText(infRes.description);
+
+            visualResultMeta = {
+              available: true,
+              description: sanitizedDesc,
+              model: 'SmolVLM-256M-Instruct',
+              executionDevice: infRes.executionDevice,
+              dtype: infRes.dtype
+            };
+
+            logActivity(`Local vision: SmolVLM/${infRes.executionDevice} (${infRes.dtype}) completed in ${infRes.inferenceMs} ms.`, 'success');
+          } catch (err) {
+            logActivity(`Local vision inference failed: ${err.message}`, 'error');
+            visualResultMeta = {
+              available: false,
+              description: `Visual inference error: ${err.message}`,
+              model: 'SmolVLM-256M-Instruct',
+              executionDevice: 'WEBGPU',
+              dtype: localVisionDtype || 'fp32'
+            };
+          }
+        }
+      } else {
+        logActivity('DOM_ONLY mode active — 0 ms visual inference.', 'info');
+      }
+
+      // Attach perception & visual metadata to sanitized cloud context (NO screenshot data, NO PII)
+      sanitizedContext.perception = {
+        mode: routingDecision.mode,
+        router: {
+          reason: routingDecision.reason,
+          signals: routingDecision.signals
+        },
+        telemetry: {
+          routingMs: routingMs,
+          visualInferenceMs: visualInferenceMs
+        }
+      };
+      sanitizedContext.visual = visualResultMeta;
+
+      // STEP 4: Request Reasoning from FastAPI / Qwen3.8-Flash
       logActivity('Requesting Qwen reasoning...', 'info');
 
       let reasonData = null;
@@ -412,6 +479,7 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (err) {
         logActivity(`Backend error: ${err.message}`, 'error');
         setStatus('✗ Backend unavailable on port 8000.', 'error');
+        previousPerceptionFailed = true;
         break;
       }
 
@@ -447,7 +515,9 @@ document.addEventListener('DOMContentLoaded', () => {
         safeActions.push(act);
       }
 
-      // STEP 4: Render & Execute Safe Actions First (e.g. FILL Address)
+      // STEP 5: Render & Execute Safe Actions First (e.g. FILL Address)
+      let targetResolutionFailed = false;
+
       if (safeActions.length > 0) {
         // Render Actions in UI
         const labelMap = {};
@@ -466,7 +536,7 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>`;
         }).join('');
 
-        // STEP 5: Execute Local Actions Sequentially
+        // STEP 6: Execute Local Actions Sequentially
         for (let i = 0; i < safeActions.length; i++) {
           const act = safeActions[i];
           const humanLabel = labelMap[act.target] || act.target;
@@ -492,6 +562,10 @@ document.addEventListener('DOMContentLoaded', () => {
               logActivity(`Filled ${humanLabel}`);
             } else {
               logActivity(`Failed to fill ${humanLabel}: ${fillRes.error || 'Target not found'}`, 'error');
+              const errStr = (fillRes && fillRes.error) ? fillRes.error.toLowerCase() : '';
+              if (errStr.includes('not found') || !fillRes) {
+                targetResolutionFailed = true;
+              }
             }
           } else if (act.action === 'CLICK') {
             const clickRes = await sendMessageToActiveTab({
@@ -503,6 +577,10 @@ document.addEventListener('DOMContentLoaded', () => {
               logActivity(`Clicked ${humanLabel}`);
             } else {
               logActivity(`Failed to click ${humanLabel}: ${clickRes.error || 'Target not found'}`, 'error');
+              const errStr = (clickRes && clickRes.error) ? clickRes.error.toLowerCase() : '';
+              if (errStr.includes('not found') || !clickRes) {
+                targetResolutionFailed = true;
+              }
             }
           } else if (act.action === 'SCROLL') {
             const dir = (act.direction || 'down').toLowerCase();
@@ -522,7 +600,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
 
-      // STEP 6: Enforce Status / Stop Condition AFTER safe actions execute
+      // Update previousPerceptionFailed state ONLY when target resolution genuinely fails
+      previousPerceptionFailed = targetResolutionFailed;
+
+      // STEP 7: Enforce Status / Stop Condition AFTER safe actions execute
       if (rawStatus === 'DONE') {
         logActivity('✓ Task completed successfully.', 'success');
         setStatus('✓ Task completed successfully.', 'success');
@@ -547,7 +628,7 @@ document.addEventListener('DOMContentLoaded', () => {
         break;
       }
 
-      // STEP 7: Loop Protection Check
+      // STEP 8: Loop Protection Check
       const actionSig = `${currentPageUrl}::` + safeActions.map(a => `${a.action}:${a.target}`).join('|');
       if (actionSig === previousStateSig) {
         logActivity('⚠ Agent appears to be repeating the same action. Loop detected.', 'warn');
@@ -556,7 +637,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       previousStateSig = actionSig;
 
-      // STEP 8: Pause for DOM stabilization before next cycle
+      // STEP 9: Pause for DOM stabilization before next cycle
       logActivity('Waiting for DOM stabilization...', 'info');
       await new Promise(r => setTimeout(r, 600));
     }
