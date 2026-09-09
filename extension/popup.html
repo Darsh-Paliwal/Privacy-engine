@@ -178,6 +178,52 @@
           </div>
         </div>
       </section>
+
+      <!-- PHASE 6A: UNIFIED PERCEPTION ENGINE -->
+      <section class="section card">
+        <div class="section-title">🧩 Unified Perception Engine</div>
+        <button id="btnRunUnifiedPerception" class="btn btn-action btn-block">
+          🧩 Run Unified Perception
+        </button>
+
+        <div id="boxUnifiedPerception" class="unified-box hidden" style="margin-top: 8px;">
+          <div class="section-title" style="font-size: 10px; margin-bottom: 4px;">DOM Perception Summary:</div>
+          <div class="metrics-grid" style="grid-template-columns: 1fr 1fr 1fr; margin-bottom: 6px;">
+            <div class="metric" style="padding: 4px;">
+              <span class="metric-value" id="valUnifiedDomInputs" style="font-size: 14px;">0</span>
+              <span class="metric-label" style="font-size: 9px;">Inputs</span>
+            </div>
+            <div class="metric" style="padding: 4px;">
+              <span class="metric-value" id="valUnifiedDomButtons" style="font-size: 14px;">0</span>
+              <span class="metric-label" style="font-size: 9px;">Buttons</span>
+            </div>
+            <div class="metric" style="padding: 4px;">
+              <span class="metric-value" id="valUnifiedDomLinks" style="font-size: 14px;">0</span>
+              <span class="metric-label" style="font-size: 9px;">Links</span>
+            </div>
+          </div>
+
+          <div class="section-title" style="font-size: 10px; margin-bottom: 4px;">Visual Perception Summary:</div>
+          <div class="vision-meta-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 10px; margin-bottom: 6px; background: var(--bg-primary); padding: 6px; border-radius: 4px; border: 1px solid var(--border-color);">
+            <div>Available: <strong id="valUnifiedVisualAvailable" style="color: var(--accent-emerald);">Yes</strong></div>
+            <div>Model: <strong id="valUnifiedVisualModel" style="color: var(--accent-indigo);">SmolVLM-256M-Instruct</strong></div>
+            <div>Device: <strong id="valUnifiedVisualDevice" style="color: var(--accent-amber);">WEBGPU</strong></div>
+            <div>Dtype: <strong id="valUnifiedVisualDtype" style="color: var(--accent-blue);">q4</strong></div>
+            <div>Inference: <strong id="valUnifiedVisualTime" style="color: var(--accent-emerald);">0 ms</strong></div>
+            <div>Screenshot: <strong id="valUnifiedScreenshotDims" style="color: var(--accent-blue);">0 × 0</strong></div>
+          </div>
+
+          <div class="section-title" style="font-size: 10px; margin-bottom: 4px;">Visual Description:</div>
+          <div id="valUnifiedVisualDesc" class="vision-output" style="background: #090d16; color: var(--text-main); font-size: 10px; padding: 6px; border-radius: 4px; border: 1px solid var(--border-color); max-height: 80px; overflow-y: auto; margin-bottom: 6px;">
+            No description.
+          </div>
+
+          <details style="font-size: 10px; color: var(--text-muted);">
+            <summary style="cursor: pointer; font-weight: 600; color: var(--accent-blue);">View Serialized Unified Perception JSON</summary>
+            <pre id="codeUnifiedJson" class="code-preview" style="margin-top: 4px; max-height: 160px; overflow-y: auto; font-size: 9px;"></pre>
+          </details>
+        </div>
+      </section>
     </main>
 
     <!-- TAB 2: PRIVACY ENGINE -->

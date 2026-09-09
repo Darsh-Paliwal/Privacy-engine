@@ -801,66 +801,91 @@ document.addEventListener('DOMContentLoaded', () => {
   async function handleCaptureScreen() {
     setStatus('Capturing local screenshot...', 'info');
 
-    try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tabs || tabs.length === 0) {
-        throw new Error('No active browser tab found.');
+    return new Promise((resolve, reject) => {
+      if (typeof chrome === 'undefined' || !chrome.tabs || !chrome.tabs.query) {
+        const errMsg = 'Chrome tabs API unavailable.';
+        setStatus(`Screenshot error: ${errMsg}`, 'error');
+        logActivity(`Screenshot capture failed: ${errMsg}`, 'error');
+        return reject(new Error(errMsg));
       }
 
-      const activeTab = tabs[0];
-      if (activeTab.url && (activeTab.url.startsWith('chrome://') || activeTab.url.startsWith('edge://') || activeTab.url.startsWith('about:'))) {
-        throw new Error('Extension cannot capture browser system pages.');
-      }
-
-      chrome.tabs.captureVisibleTab(activeTab.windowId, { format: 'jpeg', quality: 90 }, (dataUrl) => {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (chrome.runtime.lastError) {
-          const errMsg = chrome.runtime.lastError.message || 'Screenshot capture failed.';
-          console.error('[Phase 5A Capture Error]', errMsg);
+          const errMsg = chrome.runtime.lastError.message || 'Tab query failed.';
           setStatus(`Screenshot error: ${errMsg}`, 'error');
           logActivity(`Screenshot capture failed: ${errMsg}`, 'error');
-          return;
+          return reject(new Error(errMsg));
         }
 
-        if (!dataUrl) {
-          setStatus('Screenshot failed: Empty data URL returned.', 'error');
-          logActivity('Screenshot capture returned empty data.', 'error');
-          return;
+        if (!tabs || tabs.length === 0) {
+          const errMsg = 'No active browser tab found.';
+          setStatus(`Screenshot error: ${errMsg}`, 'error');
+          logActivity(`Screenshot capture failed: ${errMsg}`, 'error');
+          return reject(new Error(errMsg));
         }
 
-        const img = new Image();
-        img.onload = () => {
-          const width = img.naturalWidth || img.width;
-          const height = img.naturalHeight || img.height;
+        const activeTab = tabs[0];
+        if (activeTab.url && (activeTab.url.startsWith('chrome://') || activeTab.url.startsWith('edge://') || activeTab.url.startsWith('about:'))) {
+          const errMsg = 'Extension cannot capture browser system pages.';
+          setStatus(`Screenshot error: ${errMsg}`, 'error');
+          logActivity(`Screenshot capture failed: ${errMsg}`, 'error');
+          return reject(new Error(errMsg));
+        }
 
-          imgScreenshot.src = dataUrl;
-          valDimensions.textContent = `${width} × ${height}`;
-          valScreenshotStatus.textContent = 'Captured locally';
-          boxScreenshotPreview.classList.remove('hidden');
+        chrome.tabs.captureVisibleTab(activeTab.windowId, { format: 'jpeg', quality: 90 }, (dataUrl) => {
+          if (chrome.runtime.lastError) {
+            const errMsg = chrome.runtime.lastError.message || 'Screenshot capture failed.';
+            console.error('[Phase 5A Capture Error]', errMsg);
+            setStatus(`Screenshot error: ${errMsg}`, 'error');
+            logActivity(`Screenshot capture failed: ${errMsg}`, 'error');
+            return reject(new Error(errMsg));
+          }
 
-          setStatus(`✓ Screenshot captured locally (${width} × ${height} px).`, 'success');
-          logActivity(`Screenshot captured locally (${width} × ${height} px).`, 'success');
-        };
+          if (!dataUrl) {
+            const errMsg = 'Screenshot failed: Empty data URL returned.';
+            setStatus(errMsg, 'error');
+            logActivity('Screenshot capture returned empty data.', 'error');
+            return reject(new Error(errMsg));
+          }
 
-        img.onerror = () => {
-          setStatus('Failed to process captured screenshot preview.', 'error');
-          logActivity('Failed to process captured screenshot preview.', 'error');
-        };
+          const img = new Image();
+          img.onload = () => {
+            const width = img.naturalWidth || img.width;
+            const height = img.naturalHeight || img.height;
 
-        img.src = dataUrl;
+            imgScreenshot.src = dataUrl;
+            valDimensions.textContent = `${width} × ${height}`;
+            valScreenshotStatus.textContent = 'Captured locally';
+            boxScreenshotPreview.classList.remove('hidden');
+
+            setStatus(`✓ Screenshot captured locally (${width} × ${height} px).`, 'success');
+            logActivity(`Screenshot captured locally (${width} × ${height} px).`, 'success');
+            resolve(dataUrl);
+          };
+
+          img.onerror = () => {
+            const errMsg = 'Failed to process captured screenshot preview.';
+            setStatus(errMsg, 'error');
+            logActivity(errMsg, 'error');
+            reject(new Error(errMsg));
+          };
+
+          img.src = dataUrl;
+        });
       });
-    } catch (err) {
-      console.error('[Phase 5A Error]', err);
-      setStatus(`Screenshot error: ${err.message}`, 'error');
-      logActivity(`Screenshot error: ${err.message}`, 'error');
-    }
+    });
   }
 
   if (btnCaptureScreen) {
-    btnCaptureScreen.addEventListener('click', handleCaptureScreen);
+    btnCaptureScreen.addEventListener('click', () => {
+      handleCaptureScreen().catch(err => {
+        console.warn('[Capture Screen UI Error]', err);
+      });
+    });
   }
 
   // =========================================================================
-  // PHASE 5B: LOCAL VISION INFERENCE
+  // PHASE 5B / 6A: LOCAL VISION INFERENCE ENGINE
   // =========================================================================
   const btnAnalyzeVision = document.getElementById('btnAnalyzeVision');
   const boxVisionResult = document.getElementById('boxVisionResult');
@@ -872,7 +897,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let localVisionProcessor = null;
   let localVisionModel = null;
-  let localVisionDevice = 'wasm';
+  let localVisionDevice = 'webgpu';
   let localVisionDtype = 'fp32';
 
   async function checkWebGPUSupport() {
@@ -887,14 +912,156 @@ document.addEventListener('DOMContentLoaded', () => {
     return 'wasm';
   }
 
-  async function handleAnalyzeVisionLocally() {
-    if (!imgScreenshot || !imgScreenshot.src || imgScreenshot.src === '' || imgScreenshot.src.startsWith('about:blank')) {
-      setStatus('Please capture a screen first using "📸 Capture Screen".', 'error');
-      logActivity('Local vision analysis failed: No screenshot captured.', 'error');
-      return;
+  /**
+   * Single authoritative shared local SmolVLM vision inference routine.
+   * Loads SmolVLM-256M-Instruct on WebGPU with fp32 precision.
+   */
+  async function executeLocalVisionInference(screenshotDataUrl) {
+    if (!screenshotDataUrl || typeof screenshotDataUrl !== 'string' || screenshotDataUrl.startsWith('about:blank')) {
+      throw new Error('Invalid or empty screenshot data URL provided to vision inference.');
     }
 
-    const screenshotDataUrl = imgScreenshot.src;
+    const t0Total = performance.now();
+    const device = await checkWebGPUSupport();
+    if (device !== 'webgpu') {
+      throw new Error('WebGPU is not supported or GPU adapter request failed.');
+    }
+
+    // Lazy load model & processor once
+    if (!localVisionModel || !localVisionProcessor) {
+      logActivity('Loading SmolVLM-256M-Instruct on WEBGPU (fp32)...', 'info');
+
+      const transformers = await import(chrome.runtime.getURL('transformers.esm.js'));
+      const { AutoProcessor, AutoModelForVision2Seq, env } = transformers;
+
+      if (env) {
+        env.allowLocalModels = false;
+        env.allowRemoteModels = true;
+        const onnxUrl = chrome.runtime.getURL('onnx/');
+        if (env.wasm) env.wasm.wasmPaths = onnxUrl;
+        if (env.backends && env.backends.onnx && env.backends.onnx.wasm) {
+          env.backends.onnx.wasm.wasmPaths = onnxUrl;
+        }
+      }
+
+      const modelId = 'HuggingFaceTB/SmolVLM-256M-Instruct';
+      if (valVisionStatus) valVisionStatus.textContent = 'Downloading/Loading weights...';
+
+      localVisionProcessor = await AutoProcessor.from_pretrained(modelId);
+
+      logActivity('Loading SmolVLM on WebGPU with fp32 precision...', 'info');
+      localVisionModel = await AutoModelForVision2Seq.from_pretrained(modelId, {
+        device: 'webgpu',
+        dtype: 'fp32'
+      });
+
+      localVisionDevice = 'webgpu';
+      localVisionDtype = 'fp32';
+      if (valVisionDevice) {
+        valVisionDevice.textContent = 'WebGPU (fp32)';
+      }
+    }
+
+    // Preprocess / Resize image copy to max width 1024 while maintaining aspect ratio
+    const t0Preprocess = performance.now();
+    const transformers = await import(chrome.runtime.getURL('transformers.esm.js'));
+    const { RawImage } = transformers;
+    const originalImage = await RawImage.fromURL(screenshotDataUrl);
+    const origW = originalImage.width;
+    const origH = originalImage.height;
+
+    const TARGET_MAX_WIDTH = 1024;
+    let targetW = origW;
+    let targetH = origH;
+    if (origW > TARGET_MAX_WIDTH) {
+      targetW = TARGET_MAX_WIDTH;
+      targetH = Math.round(TARGET_MAX_WIDTH * (origH / origW));
+    }
+
+    const processedImage = (origW !== targetW || origH !== targetH)
+      ? await originalImage.resize(targetW, targetH)
+      : originalImage;
+
+    const t1Preprocess = performance.now();
+    const preprocessMs = Math.round(t1Preprocess - t0Preprocess);
+
+    // Input Prep
+    const t0InputPrep = performance.now();
+    const prompt = "List visible webpage UI elements in this screenshot: headings, input fields, buttons, links, and key controls. Be concise.";
+    const messages = [
+      {
+        role: "user",
+        content: [
+          { type: "image" },
+          { type: "text", text: prompt }
+        ]
+      }
+    ];
+
+    const textPrompt = localVisionProcessor.apply_chat_template(messages, { add_generation_prompt: true });
+    const inputs = await localVisionProcessor(textPrompt, processedImage);
+    const t1InputPrep = performance.now();
+    const inputPrepMs = Math.round(t1InputPrep - t0InputPrep);
+
+    // Generation
+    const t0Generate = performance.now();
+    const generateOutputs = await localVisionModel.generate({
+      ...inputs,
+      max_new_tokens: 80,
+      do_sample: false
+    });
+    const t1Generate = performance.now();
+    const generateMs = Math.round(t1Generate - t0Generate);
+
+    // Decoding
+    const t0Decode = performance.now();
+    const decodedText = localVisionProcessor.batch_decode(generateOutputs, { skip_special_tokens: true });
+    const t1Decode = performance.now();
+    const decodeMs = Math.round(t1Decode - t0Decode);
+
+    const inferMs = Math.round(performance.now() - t0Total);
+
+    let rawDesc = Array.isArray(decodedText) ? decodedText.join('\n').trim() : String(decodedText || '').trim();
+
+    // Case-insensitive assistant turn header extraction
+    const assistantMatch = rawDesc.match(/assistant\s*:?\s*/i);
+    if (assistantMatch) {
+      const matchIndex = rawDesc.toLowerCase().lastIndexOf(assistantMatch[0].toLowerCase());
+      if (matchIndex !== -1) {
+        rawDesc = rawDesc.substring(matchIndex + assistantMatch[0].length).trim();
+      }
+    }
+
+    return {
+      description: rawDesc,
+      executionDevice: 'WEBGPU',
+      dtype: 'fp32',
+      inferenceMs: inferMs,
+      timingBreakdown: {
+        preprocessMs,
+        inputPrepMs,
+        generateMs,
+        decodeMs,
+        origW,
+        origH,
+        targetW,
+        targetH
+      }
+    };
+  }
+
+  async function handleAnalyzeVisionLocally() {
+    let screenshotDataUrl = imgScreenshot ? imgScreenshot.src : '';
+    if (!screenshotDataUrl || screenshotDataUrl === '' || screenshotDataUrl.startsWith('about:blank')) {
+      try {
+        screenshotDataUrl = await handleCaptureScreen();
+      } catch (err) {
+        setStatus('Please capture a screen first using "📸 Capture Screen".', 'error');
+        logActivity('Local vision analysis failed: No screenshot captured.', 'error');
+        return;
+      }
+    }
+
     boxVisionResult.classList.remove('hidden');
     txtVisionOutput.textContent = 'Initializing local vision model pipeline...';
     valVisionStatus.textContent = 'Loading model...';
@@ -904,181 +1071,35 @@ document.addEventListener('DOMContentLoaded', () => {
     logActivity('Starting local vision inference...', 'info');
 
     try {
-      const device = await checkWebGPUSupport();
-      localVisionDevice = device;
-      valVisionDevice.textContent = device === 'webgpu' ? 'WebGPU' : 'WASM (CPU)';
-
-      // STEP 1: Lazy Load Transformers.js Pipeline
-      const t0Load = performance.now();
-      if (!localVisionModel || !localVisionProcessor) {
-        logActivity(`Loading SmolVLM-256M-Instruct on ${device.toUpperCase()}...`, 'info');
-
-        const transformers = await import(chrome.runtime.getURL('transformers.esm.js'));
-        const { AutoProcessor, AutoModelForVision2Seq, env } = transformers;
-
-        if (env) {
-          env.allowLocalModels = false;
-          env.allowRemoteModels = true;
-          const onnxUrl = chrome.runtime.getURL('onnx/');
-          if (env.wasm) {
-            env.wasm.wasmPaths = onnxUrl;
-          }
-          if (env.backends && env.backends.onnx && env.backends.onnx.wasm) {
-            env.backends.onnx.wasm.wasmPaths = onnxUrl;
-          }
-        }
-
-        const modelId = 'HuggingFaceTB/SmolVLM-256M-Instruct';
-        valVisionStatus.textContent = 'Downloading/Loading weights...';
-
-        localVisionProcessor = await AutoProcessor.from_pretrained(modelId);
-        
-        let loadedModel = null;
-        let loadedDtype = 'fp32';
-        try {
-          if (device === 'webgpu') {
-            try {
-              logActivity('Loading SmolVLM on WebGPU with q4 quantization...', 'info');
-              loadedModel = await AutoModelForVision2Seq.from_pretrained(modelId, {
-                device: 'webgpu',
-                dtype: 'q4'
-              });
-              loadedDtype = 'q4';
-              localVisionDevice = 'webgpu';
-            } catch (q4Err) {
-              console.warn('[Phase 5B] WebGPU q4 load failed, falling back to fp32:', q4Err);
-              logActivity('Loading SmolVLM on WebGPU with fp32...', 'info');
-              loadedModel = await AutoModelForVision2Seq.from_pretrained(modelId, {
-                device: 'webgpu',
-                dtype: 'fp32'
-              });
-              loadedDtype = 'fp32';
-              localVisionDevice = 'webgpu';
-            }
-          }
-        } catch (gpuErr) {
-          console.warn('[Phase 5B] WebGPU model load failed, falling back to WASM:', gpuErr);
-          loadedModel = null;
-        }
-
-        if (!loadedModel) {
-          loadedModel = await AutoModelForVision2Seq.from_pretrained(modelId, {
-            device: 'wasm',
-            dtype: 'fp32'
-          });
-          loadedDtype = 'fp32';
-          localVisionDevice = 'wasm';
-        }
-
-        localVisionModel = loadedModel;
-        localVisionDtype = loadedDtype;
-        valVisionDevice.textContent = `${localVisionDevice === 'webgpu' ? 'WebGPU' : 'WASM (CPU)'} (${loadedDtype})`;
-      }
-      const t1Load = performance.now();
-      const loadMs = Math.round(t1Load - t0Load);
-      valModelLoadTime.textContent = `${loadMs} ms`;
-
       valVisionStatus.textContent = 'Analyzing screen...';
       txtVisionOutput.textContent = 'Analyzing screenshot locally via SmolVLM...';
       logActivity('Model ready. Running local SmolVLM vision inference...', 'info');
 
-      // STEP 2: Local Vision Inference on Real Screenshot Pixels with Performance Optimizations
-      const t0Preprocess = performance.now();
-
-      const transformers = await import(chrome.runtime.getURL('transformers.esm.js'));
-      const { RawImage } = transformers;
-      const originalImage = await RawImage.fromURL(screenshotDataUrl);
-      const origW = originalImage.width;
-      const origH = originalImage.height;
-
-      // Resize copy to max width 1024 while maintaining aspect ratio (original screenshot untouched)
-      const TARGET_MAX_WIDTH = 1024;
-      let targetW = origW;
-      let targetH = origH;
-      if (origW > TARGET_MAX_WIDTH) {
-        targetW = TARGET_MAX_WIDTH;
-        targetH = Math.round(TARGET_MAX_WIDTH * (origH / origW));
-      }
-
-      const processedImage = (origW !== targetW || origH !== targetH)
-        ? await originalImage.resize(targetW, targetH)
-        : originalImage;
-
-      const t1Preprocess = performance.now();
-      const preprocessMs = Math.round(t1Preprocess - t0Preprocess);
-
-      // STEP 3: Processor / Input Preparation
-      const t0InputPrep = performance.now();
-
-      const prompt = "List visible webpage UI elements in this screenshot: headings, input fields, buttons, links, and key controls. Be concise.";
-
-      const messages = [
-        {
-          role: "user",
-          content: [
-            { type: "image" },
-            { type: "text", text: prompt }
-          ]
-        }
-      ];
-
-      const textPrompt = localVisionProcessor.apply_chat_template(messages, { add_generation_prompt: true });
-      const inputs = await localVisionProcessor(textPrompt, processedImage);
-
-      const t1InputPrep = performance.now();
-      const inputPrepMs = Math.round(t1InputPrep - t0InputPrep);
-
-      // STEP 4: Deterministic Model Generation
-      const t0Generate = performance.now();
-
-      const generateOutputs = await localVisionModel.generate({
-        ...inputs,
-        max_new_tokens: 80,
-        do_sample: false
-      });
-
-      const t1Generate = performance.now();
-      const generateMs = Math.round(t1Generate - t0Generate);
-
-      // STEP 5: Decoding / Post-Processing
-      const t0Decode = performance.now();
-
-      const decodedText = localVisionProcessor.batch_decode(generateOutputs, { skip_special_tokens: true });
-
-      const t1Decode = performance.now();
-      const decodeMs = Math.round(t1Decode - t0Decode);
-      const inferMs = preprocessMs + inputPrepMs + generateMs + decodeMs;
-
-      valInferenceTime.textContent = `${inferMs} ms`;
+      const result = await executeLocalVisionInference(screenshotDataUrl);
+      valVisionDevice.textContent = `${result.executionDevice} (${result.dtype})`;
+      valInferenceTime.textContent = `${result.inferenceMs} ms`;
       valVisionStatus.textContent = 'Analysis complete';
 
-      let resultString = '';
-      if (Array.isArray(decodedText)) {
-        resultString = decodedText.join('\n').trim();
-      } else {
-        resultString = String(decodedText || '').trim();
-      }
-
-      txtVisionOutput.textContent = `${resultString}\n\n` +
+      const tb = result.timingBreakdown;
+      txtVisionOutput.textContent = `${result.description}\n\n` +
         `----------------------------------------\n` +
         `[Performance & Instrumentation Breakdown]\n` +
-        `• Vision Input Dimensions: ${targetW} × ${targetH} (original: ${origW} × ${origH})\n` +
-        `• Active dtype: ${localVisionDtype}\n` +
-        `• Execution Device: ${localVisionDevice.toUpperCase()}\n` +
-        `• Image Preprocessing / Resize: ${preprocessMs} ms\n` +
-        `• Processor / Input Prep: ${inputPrepMs} ms\n` +
-        `• Model Generate: ${generateMs} ms\n` +
-        `• Text Decoding: ${decodeMs} ms\n` +
-        `• Total Warm Inference: ${inferMs} ms`;
+        `• Vision Input Dimensions: ${tb.targetW} × ${tb.targetH} (original: ${tb.origW} × ${tb.origH})\n` +
+        `• Active dtype: ${result.dtype}\n` +
+        `• Execution Device: ${result.executionDevice}\n` +
+        `• Image Preprocessing / Resize: ${tb.preprocessMs} ms\n` +
+        `• Processor / Input Prep: ${tb.inputPrepMs} ms\n` +
+        `• Model Generate: ${tb.generateMs} ms\n` +
+        `• Text Decoding: ${tb.decodeMs} ms\n` +
+        `• Total Warm Inference: ${result.inferenceMs} ms`;
 
-      setStatus(`✓ Local vision analysis complete (${inferMs} ms).`, 'success');
-      logActivity(`Local vision complete (${inferMs} ms total | Resize: ${preprocessMs}ms, Prep: ${inputPrepMs}ms, Gen: ${generateMs}ms, Dec: ${decodeMs}ms | Input: ${targetW}x${targetH}).`, 'success');
+      setStatus(`✓ Local vision analysis complete (${result.inferenceMs} ms).`, 'success');
+      logActivity(`Local vision complete (${result.inferenceMs} ms total | Resize: ${tb.preprocessMs}ms, Prep: ${tb.inputPrepMs}ms, Gen: ${tb.generateMs}ms, Dec: ${tb.decodeMs}ms | Input: ${tb.targetW}x${tb.targetH}).`, 'success');
 
     } catch (err) {
       console.error('[Phase 5B Vision Inference Error]', err);
       console.error('Error details:', err.name, err.message, err.stack);
 
-      // STEP 1 Requirement: Absolutely NO mock/heuristic fallback on error!
       valVisionStatus.textContent = 'Vision inference failed';
       valInferenceTime.textContent = '-- ms';
       txtVisionOutput.textContent = `Error: ${err.name || 'Error'}: ${err.message || 'Vision inference failed.'}`;
@@ -1111,8 +1132,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // 1. Ensure screenshot is available
     let screenshotDataUrl = imgScreenshot ? imgScreenshot.src : '';
     if (!screenshotDataUrl || screenshotDataUrl === '' || screenshotDataUrl.startsWith('about:blank')) {
-      await handleCaptureScreen();
-      screenshotDataUrl = imgScreenshot ? imgScreenshot.src : '';
+      try {
+        screenshotDataUrl = await handleCaptureScreen();
+      } catch (err) {
+        screenshotDataUrl = '';
+      }
     }
 
     if (!screenshotDataUrl || screenshotDataUrl === '' || screenshotDataUrl.startsWith('about:blank')) {
@@ -1266,6 +1290,175 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (btnRedactVisuals) {
     btnRedactVisuals.addEventListener('click', handleRedactVisualPrivacy);
+  }
+
+  // =========================================================================
+  // PHASE 6A: UNIFIED PERCEPTION ENGINE
+  // =========================================================================
+  const btnRunUnifiedPerception = document.getElementById('btnRunUnifiedPerception');
+  const boxUnifiedPerception = document.getElementById('boxUnifiedPerception');
+  const valUnifiedDomInputs = document.getElementById('valUnifiedDomInputs');
+  const valUnifiedDomButtons = document.getElementById('valUnifiedDomButtons');
+  const valUnifiedDomLinks = document.getElementById('valUnifiedDomLinks');
+  const valUnifiedVisualAvailable = document.getElementById('valUnifiedVisualAvailable');
+  const valUnifiedVisualModel = document.getElementById('valUnifiedVisualModel');
+  const valUnifiedVisualDevice = document.getElementById('valUnifiedVisualDevice');
+  const valUnifiedVisualDtype = document.getElementById('valUnifiedVisualDtype');
+  const valUnifiedVisualTime = document.getElementById('valUnifiedVisualTime');
+  const valUnifiedVisualDesc = document.getElementById('valUnifiedVisualDesc');
+  const valUnifiedScreenshotDims = document.getElementById('valUnifiedScreenshotDims');
+  const codeUnifiedJson = document.getElementById('codeUnifiedJson');
+
+  /**
+   * Phase 6A: Lightweight local sanitization over raw VLM text description
+   * Replaces obvious sensitive patterns (emails, phone numbers, passwords) with placeholders.
+   */
+  function sanitizeVisualDescriptionText(text) {
+    if (!text || typeof text !== 'string') return '';
+    let sanitized = text;
+
+    // 1. Email pattern replacement
+    sanitized = sanitized.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '<EMAIL>');
+
+    // 2. Phone number pattern replacement (7+ digits with optional separators)
+    sanitized = sanitized.replace(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g, '<PHONE>');
+
+    // 3. Password pattern signals
+    sanitized = sanitized.replace(/\b(password|secret|passcode)\s*[:=]\s*\S+/gi, '$1: <PASSWORD>');
+
+    return sanitized;
+  }
+
+  function renderUnifiedPerceptionUI(data) {
+    if (!data) return;
+
+    if (valUnifiedDomInputs) valUnifiedDomInputs.textContent = String(data.dom.counts.inputs);
+    if (valUnifiedDomButtons) valUnifiedDomButtons.textContent = String(data.dom.counts.buttons);
+    if (valUnifiedDomLinks) valUnifiedDomLinks.textContent = String(data.dom.counts.links);
+
+    if (valUnifiedVisualAvailable) valUnifiedVisualAvailable.textContent = data.visual.available ? 'Yes' : 'No';
+    if (valUnifiedVisualModel) valUnifiedVisualModel.textContent = data.visual.model;
+    if (valUnifiedVisualDevice) valUnifiedVisualDevice.textContent = data.visual.executionDevice;
+    if (valUnifiedVisualDtype) valUnifiedVisualDtype.textContent = data.visual.dtype;
+    if (valUnifiedVisualTime) valUnifiedVisualTime.textContent = `${data.visual.inferenceMs} ms`;
+    if (valUnifiedVisualDesc) valUnifiedVisualDesc.textContent = data.visual.description || 'No description produced.';
+
+    if (valUnifiedScreenshotDims) valUnifiedScreenshotDims.textContent = `${data.screenshot.width} × ${data.screenshot.height}`;
+    if (codeUnifiedJson) codeUnifiedJson.textContent = JSON.stringify(data, null, 2);
+
+    if (boxUnifiedPerception) boxUnifiedPerception.classList.remove('hidden');
+  }
+
+  /**
+   * Phase 6A: Unified Perception Engine Entry Point
+   * Combines DOM perception scan, screenshot metadata, and local SmolVLM visual description.
+   */
+  async function runUnifiedPerception() {
+    setStatus('Executing Unified Perception Engine (DOM + Local Vision)...', 'info');
+
+    // 1. DOM Scan from active tab content script
+    const scanRes = await sendMessageToActiveTab({ type: 'SCAN_PAGE' });
+    if (!scanRes || !scanRes.success) {
+      setStatus('Unified Perception failed: Unable to scan DOM elements.', 'error');
+      logActivity('Unified Perception failed: DOM scan unavailable.', 'error');
+      return null;
+    }
+
+    // 2. Apply existing AgentPrivacyEngine sanitization to DOM data
+    const sanitizedDom = AgentPrivacyEngine.sanitizePageData(scanRes);
+
+    // 3. Capture local screenshot if not already captured
+    let screenshotDataUrl = imgScreenshot ? imgScreenshot.src : '';
+    if (!screenshotDataUrl || screenshotDataUrl === '' || screenshotDataUrl.startsWith('about:blank')) {
+      try {
+        screenshotDataUrl = await handleCaptureScreen();
+      } catch (err) {
+        console.warn('[Unified Perception] Screenshot capture failed:', err);
+      }
+    }
+
+    let screenshotMeta = {
+      available: false,
+      width: 0,
+      height: 0
+    };
+
+    if (imgScreenshot && imgScreenshot.naturalWidth) {
+      screenshotMeta = {
+        available: true,
+        width: imgScreenshot.naturalWidth || imgScreenshot.width,
+        height: imgScreenshot.naturalHeight || imgScreenshot.height
+      };
+    }
+
+    // 4. Run local SmolVLM inference on screenshot pixels
+    let visualRes = {
+      available: false,
+      description: 'No visual analysis performed',
+      model: 'SmolVLM-256M-Instruct',
+      executionDevice: 'WEBGPU',
+      dtype: localVisionDtype || 'fp32',
+      inferenceMs: 0
+    };
+
+    if (screenshotDataUrl && !screenshotDataUrl.startsWith('about:blank')) {
+      try {
+        const infRes = await executeLocalVisionInference(screenshotDataUrl);
+        const sanitizedDesc = sanitizeVisualDescriptionText(infRes.description);
+        visualRes = {
+          available: true,
+          description: sanitizedDesc,
+          model: 'SmolVLM-256M-Instruct',
+          executionDevice: infRes.executionDevice,
+          dtype: infRes.dtype,
+          inferenceMs: infRes.inferenceMs
+        };
+      } catch (err) {
+        console.warn('[Phase 6A Unified Perception Vision Warning]', err);
+        visualRes = {
+          available: false,
+          description: `Visual inference error: ${err.message}`,
+          model: 'SmolVLM-256M-Instruct',
+          executionDevice: 'WEBGPU',
+          dtype: localVisionDtype || 'fp32',
+          inferenceMs: 0
+        };
+      }
+    }
+
+    // 5. Construct Unified Perception Object
+    const allButtons = scanRes.buttons || [];
+    const linkElements = allButtons.filter(b => b.type === 'link').map(l => ({ target: l.agentId || l.text, text: l.text }));
+    const buttonElements = (sanitizedDom.buttons || []).filter(b => b.type !== 'link');
+
+    const unifiedPerception = {
+      dom: {
+        inputs: sanitizedDom.fields || [],
+        buttons: buttonElements,
+        links: linkElements,
+        counts: {
+          inputs: (sanitizedDom.fields || []).length,
+          buttons: buttonElements.length,
+          links: linkElements.length
+        },
+        viewport: scanRes.viewport || { width: 0, height: 0, devicePixelRatio: 1 }
+      },
+      visual: visualRes,
+      screenshot: screenshotMeta,
+      generatedAt: new Date().toISOString()
+    };
+
+    // 6. Update Debug UI
+    renderUnifiedPerceptionUI(unifiedPerception);
+
+    setStatus(`✓ Unified perception complete (DOM: ${unifiedPerception.dom.counts.inputs} inputs, Vision: ${unifiedPerception.visual.inferenceMs} ms).`, 'success');
+    logActivity(`Unified Perception complete (Inputs: ${unifiedPerception.dom.counts.inputs}, Buttons: ${unifiedPerception.dom.counts.buttons}, Links: ${unifiedPerception.dom.counts.links} | Vision: ${unifiedPerception.visual.executionDevice}/${unifiedPerception.visual.dtype} in ${unifiedPerception.visual.inferenceMs}ms).`, 'success');
+
+    return unifiedPerception;
+  }
+
+  if (btnRunUnifiedPerception) {
+    btnRunUnifiedPerception.addEventListener('click', runUnifiedPerception);
   }
 
   // Initialize
