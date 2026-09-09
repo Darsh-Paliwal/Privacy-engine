@@ -859,6 +859,238 @@ document.addEventListener('DOMContentLoaded', () => {
     btnCaptureScreen.addEventListener('click', handleCaptureScreen);
   }
 
+  // =========================================================================
+  // PHASE 5B: LOCAL VISION INFERENCE
+  // =========================================================================
+  const btnAnalyzeVision = document.getElementById('btnAnalyzeVision');
+  const boxVisionResult = document.getElementById('boxVisionResult');
+  const txtVisionOutput = document.getElementById('txtVisionOutput');
+  const valVisionDevice = document.getElementById('valVisionDevice');
+  const valVisionStatus = document.getElementById('valVisionStatus');
+  const valModelLoadTime = document.getElementById('valModelLoadTime');
+  const valInferenceTime = document.getElementById('valInferenceTime');
+
+  let localVisionProcessor = null;
+  let localVisionModel = null;
+  let localVisionDevice = 'wasm';
+  let localVisionDtype = 'fp32';
+
+  async function checkWebGPUSupport() {
+    if (navigator.gpu) {
+      try {
+        const adapter = await navigator.gpu.requestAdapter();
+        if (adapter) return 'webgpu';
+      } catch (e) {
+        console.warn('[Phase 5B] WebGPU requestAdapter failed:', e);
+      }
+    }
+    return 'wasm';
+  }
+
+  async function handleAnalyzeVisionLocally() {
+    if (!imgScreenshot || !imgScreenshot.src || imgScreenshot.src === '' || imgScreenshot.src.startsWith('about:blank')) {
+      setStatus('Please capture a screen first using "📸 Capture Screen".', 'error');
+      logActivity('Local vision analysis failed: No screenshot captured.', 'error');
+      return;
+    }
+
+    const screenshotDataUrl = imgScreenshot.src;
+    boxVisionResult.classList.remove('hidden');
+    txtVisionOutput.textContent = 'Initializing local vision model pipeline...';
+    valVisionStatus.textContent = 'Loading model...';
+    valModelLoadTime.textContent = '-- ms';
+    valInferenceTime.textContent = '-- ms';
+    setStatus('Initializing local vision model...', 'info');
+    logActivity('Starting local vision inference...', 'info');
+
+    try {
+      const device = await checkWebGPUSupport();
+      localVisionDevice = device;
+      valVisionDevice.textContent = device === 'webgpu' ? 'WebGPU' : 'WASM (CPU)';
+
+      // STEP 1: Lazy Load Transformers.js Pipeline
+      const t0Load = performance.now();
+      if (!localVisionModel || !localVisionProcessor) {
+        logActivity(`Loading SmolVLM-256M-Instruct on ${device.toUpperCase()}...`, 'info');
+
+        const transformers = await import(chrome.runtime.getURL('transformers.esm.js'));
+        const { AutoProcessor, AutoModelForVision2Seq, env } = transformers;
+
+        if (env) {
+          env.allowLocalModels = false;
+          env.allowRemoteModels = true;
+          const onnxUrl = chrome.runtime.getURL('onnx/');
+          if (env.wasm) {
+            env.wasm.wasmPaths = onnxUrl;
+          }
+          if (env.backends && env.backends.onnx && env.backends.onnx.wasm) {
+            env.backends.onnx.wasm.wasmPaths = onnxUrl;
+          }
+        }
+
+        const modelId = 'HuggingFaceTB/SmolVLM-256M-Instruct';
+        valVisionStatus.textContent = 'Downloading/Loading weights...';
+
+        localVisionProcessor = await AutoProcessor.from_pretrained(modelId);
+        
+        let loadedModel = null;
+        let loadedDtype = 'fp32';
+        try {
+          if (device === 'webgpu') {
+            try {
+              logActivity('Loading SmolVLM on WebGPU with q4 quantization...', 'info');
+              loadedModel = await AutoModelForVision2Seq.from_pretrained(modelId, {
+                device: 'webgpu',
+                dtype: 'q4'
+              });
+              loadedDtype = 'q4';
+              localVisionDevice = 'webgpu';
+            } catch (q4Err) {
+              console.warn('[Phase 5B] WebGPU q4 load failed, falling back to fp32:', q4Err);
+              logActivity('Loading SmolVLM on WebGPU with fp32...', 'info');
+              loadedModel = await AutoModelForVision2Seq.from_pretrained(modelId, {
+                device: 'webgpu',
+                dtype: 'fp32'
+              });
+              loadedDtype = 'fp32';
+              localVisionDevice = 'webgpu';
+            }
+          }
+        } catch (gpuErr) {
+          console.warn('[Phase 5B] WebGPU model load failed, falling back to WASM:', gpuErr);
+          loadedModel = null;
+        }
+
+        if (!loadedModel) {
+          loadedModel = await AutoModelForVision2Seq.from_pretrained(modelId, {
+            device: 'wasm',
+            dtype: 'fp32'
+          });
+          loadedDtype = 'fp32';
+          localVisionDevice = 'wasm';
+        }
+
+        localVisionModel = loadedModel;
+        localVisionDtype = loadedDtype;
+        valVisionDevice.textContent = `${localVisionDevice === 'webgpu' ? 'WebGPU' : 'WASM (CPU)'} (${loadedDtype})`;
+      }
+      const t1Load = performance.now();
+      const loadMs = Math.round(t1Load - t0Load);
+      valModelLoadTime.textContent = `${loadMs} ms`;
+
+      valVisionStatus.textContent = 'Analyzing screen...';
+      txtVisionOutput.textContent = 'Analyzing screenshot locally via SmolVLM...';
+      logActivity('Model ready. Running local SmolVLM vision inference...', 'info');
+
+      // STEP 2: Local Vision Inference on Real Screenshot Pixels with Performance Optimizations
+      const t0Preprocess = performance.now();
+
+      const transformers = await import(chrome.runtime.getURL('transformers.esm.js'));
+      const { RawImage } = transformers;
+      const originalImage = await RawImage.fromURL(screenshotDataUrl);
+      const origW = originalImage.width;
+      const origH = originalImage.height;
+
+      // Resize copy to max width 1024 while maintaining aspect ratio (original screenshot untouched)
+      const TARGET_MAX_WIDTH = 1024;
+      let targetW = origW;
+      let targetH = origH;
+      if (origW > TARGET_MAX_WIDTH) {
+        targetW = TARGET_MAX_WIDTH;
+        targetH = Math.round(TARGET_MAX_WIDTH * (origH / origW));
+      }
+
+      const processedImage = (origW !== targetW || origH !== targetH)
+        ? await originalImage.resize(targetW, targetH)
+        : originalImage;
+
+      const t1Preprocess = performance.now();
+      const preprocessMs = Math.round(t1Preprocess - t0Preprocess);
+
+      // STEP 3: Processor / Input Preparation
+      const t0InputPrep = performance.now();
+
+      const prompt = "List visible webpage UI elements in this screenshot: headings, input fields, buttons, links, and key controls. Be concise.";
+
+      const messages = [
+        {
+          role: "user",
+          content: [
+            { type: "image" },
+            { type: "text", text: prompt }
+          ]
+        }
+      ];
+
+      const textPrompt = localVisionProcessor.apply_chat_template(messages, { add_generation_prompt: true });
+      const inputs = await localVisionProcessor(textPrompt, processedImage);
+
+      const t1InputPrep = performance.now();
+      const inputPrepMs = Math.round(t1InputPrep - t0InputPrep);
+
+      // STEP 4: Deterministic Model Generation
+      const t0Generate = performance.now();
+
+      const generateOutputs = await localVisionModel.generate({
+        ...inputs,
+        max_new_tokens: 80,
+        do_sample: false
+      });
+
+      const t1Generate = performance.now();
+      const generateMs = Math.round(t1Generate - t0Generate);
+
+      // STEP 5: Decoding / Post-Processing
+      const t0Decode = performance.now();
+
+      const decodedText = localVisionProcessor.batch_decode(generateOutputs, { skip_special_tokens: true });
+
+      const t1Decode = performance.now();
+      const decodeMs = Math.round(t1Decode - t0Decode);
+      const inferMs = preprocessMs + inputPrepMs + generateMs + decodeMs;
+
+      valInferenceTime.textContent = `${inferMs} ms`;
+      valVisionStatus.textContent = 'Analysis complete';
+
+      let resultString = '';
+      if (Array.isArray(decodedText)) {
+        resultString = decodedText.join('\n').trim();
+      } else {
+        resultString = String(decodedText || '').trim();
+      }
+
+      txtVisionOutput.textContent = `${resultString}\n\n` +
+        `----------------------------------------\n` +
+        `[Performance & Instrumentation Breakdown]\n` +
+        `• Vision Input Dimensions: ${targetW} × ${targetH} (original: ${origW} × ${origH})\n` +
+        `• Active dtype: ${localVisionDtype}\n` +
+        `• Execution Device: ${localVisionDevice.toUpperCase()}\n` +
+        `• Image Preprocessing / Resize: ${preprocessMs} ms\n` +
+        `• Processor / Input Prep: ${inputPrepMs} ms\n` +
+        `• Model Generate: ${generateMs} ms\n` +
+        `• Text Decoding: ${decodeMs} ms\n` +
+        `• Total Warm Inference: ${inferMs} ms`;
+
+      setStatus(`✓ Local vision analysis complete (${inferMs} ms).`, 'success');
+      logActivity(`Local vision complete (${inferMs} ms total | Resize: ${preprocessMs}ms, Prep: ${inputPrepMs}ms, Gen: ${generateMs}ms, Dec: ${decodeMs}ms | Input: ${targetW}x${targetH}).`, 'success');
+
+    } catch (err) {
+      console.error('[Phase 5B Vision Inference Error]', err);
+      console.error('Error details:', err.name, err.message, err.stack);
+
+      // STEP 1 Requirement: Absolutely NO mock/heuristic fallback on error!
+      valVisionStatus.textContent = 'Vision inference failed';
+      valInferenceTime.textContent = '-- ms';
+      txtVisionOutput.textContent = `Error: ${err.name || 'Error'}: ${err.message || 'Vision inference failed.'}`;
+      setStatus(`Vision inference failed: ${err.message}`, 'error');
+      logActivity(`Vision inference failed: ${err.message}`, 'error');
+    }
+  }
+
+  if (btnAnalyzeVision) {
+    btnAnalyzeVision.addEventListener('click', handleAnalyzeVisionLocally);
+  }
+
   // Initialize
   populateProfileForm();
   handleScanPage();

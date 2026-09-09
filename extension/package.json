@@ -1,0 +1,15 @@
+{
+  "name": "extension",
+  "version": "1.0.0",
+  "description": "> **SIH Problem Statement 26171**: On-device Visual Perception for Lightweight Browser Agents   > **Phase 3 Status**: Completed (Local Profile + Privacy Boundary & Context Sanitization)",
+  "main": "content.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0"
+  }
+}

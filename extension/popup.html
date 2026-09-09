@@ -122,6 +122,33 @@
           </div>
         </div>
       </section>
+
+      <!-- PHASE 5B: LOCAL VISION INFERENCE -->
+      <section class="section card">
+        <div class="section-title">👁️ Local Vision</div>
+        <button id="btnAnalyzeVision" class="btn btn-action btn-block">
+          👁️ Analyze Screen Locally
+        </button>
+
+        <div id="boxVisionResult" class="vision-box hidden" style="margin-top: 8px;">
+          <div class="vision-meta-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 10px; margin-bottom: 6px; background: var(--bg-primary); padding: 6px; border-radius: 4px; border: 1px solid var(--border-color);">
+            <div>Model: <strong style="color: var(--accent-indigo);">SmolVLM-256M-Instruct</strong></div>
+            <div>Runtime: <strong id="valVisionDevice" style="color: var(--accent-amber);">Detecting...</strong></div>
+            <div>Inference: <strong style="color: var(--accent-emerald);">Local (0 Network Upload)</strong></div>
+            <div>Status: <strong id="valVisionStatus" style="color: var(--accent-blue);">Idle</strong></div>
+          </div>
+
+          <div class="section-title" style="font-size: 10px; margin-bottom: 4px;">Local Visual Description:</div>
+          <div id="txtVisionOutput" class="vision-output" style="background: #090d16; color: var(--text-main); font-size: 11px; padding: 8px; border-radius: 4px; border: 1px solid var(--border-color); max-height: 140px; overflow-y: auto; white-space: pre-wrap; line-height: 1.4;">
+            No analysis performed yet.
+          </div>
+
+          <div class="vision-timing-bar" style="margin-top: 6px; font-size: 10px; display: flex; justify-content: space-between; color: var(--text-muted);">
+            <span>Model Load: <strong id="valModelLoadTime" style="color: var(--accent-blue);">-- ms</strong></span>
+            <span>Inference: <strong id="valInferenceTime" style="color: var(--accent-emerald);">-- ms</strong></span>
+          </div>
+        </div>
+      </section>
     </main>
 
     <!-- TAB 2: PRIVACY ENGINE -->
