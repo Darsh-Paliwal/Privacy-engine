@@ -185,6 +185,7 @@
       const inputType = el.getAttribute('type') || (type === 'textarea' ? 'textarea' : 'text');
       const label = resolveLabel(el);
       const agentId = ensureAgentId(el, idx);
+      const r = el.getBoundingClientRect();
 
       detectedInputs.push({
         type: type,
@@ -199,7 +200,13 @@
         enabled: isElementEnabled(el),
         agentId: agentId,
         hasFile: inputType === 'file' ? Boolean(el.files && el.files.length > 0) : false,
-        value: (inputType !== 'password' && inputType !== 'file') ? (el.value || '') : ''
+        value: (inputType !== 'password' && inputType !== 'file') ? (el.value || '') : '',
+        rect: {
+          left: Math.round(r.left),
+          top: Math.round(r.top),
+          width: Math.round(r.width),
+          height: Math.round(r.height)
+        }
       });
     });
 
@@ -208,6 +215,7 @@
       const type = el.tagName.toLowerCase();
       const text = el.textContent.trim() || el.value || el.getAttribute('aria-label') || el.getAttribute('title') || el.id || 'Button';
       const agentId = ensureAgentId(el, idx + 100);
+      const r = el.getBoundingClientRect();
 
       detectedButtons.push({
         type: type === 'a' ? 'link' : 'button',
@@ -216,7 +224,13 @@
         name: el.getAttribute('name') || '',
         visible: isElementVisible(el),
         enabled: isElementEnabled(el),
-        agentId: agentId
+        agentId: agentId,
+        rect: {
+          left: Math.round(r.left),
+          top: Math.round(r.top),
+          width: Math.round(r.width),
+          height: Math.round(r.height)
+        }
       });
     });
 
@@ -226,6 +240,11 @@
       success: true,
       url: window.location.href,
       title: document.title,
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio || 1
+      },
       totalInputs: detectedInputs.length,
       totalButtons: detectedButtons.length,
       inputs: detectedInputs,

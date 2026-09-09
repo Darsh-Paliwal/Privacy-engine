@@ -1091,6 +1091,183 @@ document.addEventListener('DOMContentLoaded', () => {
     btnAnalyzeVision.addEventListener('click', handleAnalyzeVisionLocally);
   }
 
+  // =========================================================================
+  // PHASE 5C: LOCAL VISUAL PRIVACY REDACTION
+  // =========================================================================
+  const btnRedactVisuals = document.getElementById('btnRedactVisuals');
+  const boxRedactionResult = document.getElementById('boxRedactionResult');
+  const valOriginalDimensions = document.getElementById('valOriginalDimensions');
+  const valViewportDimensions = document.getElementById('valViewportDimensions');
+  const valDPR = document.getElementById('valDPR');
+  const valScaleFactors = document.getElementById('valScaleFactors');
+  const valSensitiveRegionCount = document.getElementById('valSensitiveRegionCount');
+  const valRedactionStatus = document.getElementById('valRedactionStatus');
+  const imgRedactedScreenshot = document.getElementById('imgRedactedScreenshot');
+  const listRedactedRegions = document.getElementById('listRedactedRegions');
+
+  async function handleRedactVisualPrivacy() {
+    setStatus('Capturing screenshot and executing local visual privacy redaction...', 'info');
+
+    // 1. Ensure screenshot is available
+    let screenshotDataUrl = imgScreenshot ? imgScreenshot.src : '';
+    if (!screenshotDataUrl || screenshotDataUrl === '' || screenshotDataUrl.startsWith('about:blank')) {
+      await handleCaptureScreen();
+      screenshotDataUrl = imgScreenshot ? imgScreenshot.src : '';
+    }
+
+    if (!screenshotDataUrl || screenshotDataUrl === '' || screenshotDataUrl.startsWith('about:blank')) {
+      setStatus('Visual redaction failed: No screenshot captured.', 'error');
+      logActivity('Visual redaction failed: No screenshot available.', 'error');
+      return;
+    }
+
+    // 2. Perform DOM perception scan via content script
+    const scanRes = await sendMessageToActiveTab({ type: 'SCAN_PAGE' });
+    if (!scanRes || !scanRes.success) {
+      setStatus('Visual redaction failed: Unable to scan DOM elements.', 'error');
+      logActivity('Visual redaction failed: DOM scan failed.', 'error');
+      return;
+    }
+
+    // 3. Load screenshot image to get authoritative pixel dimensions
+    const img = new Image();
+    img.onload = () => {
+      const imgWidth = img.naturalWidth || img.width;
+      const imgHeight = img.naturalHeight || img.height;
+
+      // Extract viewport & DPR metrics from content script scan payload
+      const viewport = scanRes.viewport || {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio || 1
+      };
+
+      const vpWidth = viewport.width || 1280;
+      const vpHeight = viewport.height || 720;
+      const dpr = viewport.devicePixelRatio || 1;
+
+      // Calculate scale factors (Screenshot Pixels / Viewport CSS Pixels)
+      const scaleX = imgWidth / vpWidth;
+      const scaleY = imgHeight / vpHeight;
+
+      // 4. Identify sensitive elements using existing AgentPrivacyEngine
+      const sensitiveRegions = [];
+
+      (scanRes.inputs || []).forEach(inp => {
+        if (!inp.visible || !inp.rect) return;
+        const cls = AgentPrivacyEngine.classifyElement(inp);
+        if (cls.sensitive) {
+          sensitiveRegions.push({
+            label: inp.label || inp.id || inp.name || 'Input',
+            category: cls.category,
+            rect: inp.rect
+          });
+        }
+      });
+
+      (scanRes.buttons || []).forEach(btn => {
+        if (!btn.visible || !btn.rect) return;
+        const cls = AgentPrivacyEngine.classifyElement(btn);
+        if (cls.sensitive) {
+          sensitiveRegions.push({
+            label: btn.text || btn.id || 'Button',
+            category: cls.category,
+            rect: btn.rect
+          });
+        }
+      });
+
+      // 5. Redact sensitive regions on HTML Canvas at full screenshot resolution
+      const canvas = document.createElement('canvas');
+      canvas.width = imgWidth;
+      canvas.height = imgHeight;
+      const ctx = canvas.getContext('2d');
+
+      // Draw original screenshot
+      ctx.drawImage(img, 0, 0);
+
+      const mappedBoundingBoxes = [];
+
+      sensitiveRegions.forEach(item => {
+        const r = item.rect;
+        if (!r || r.width <= 0 || r.height <= 0) return;
+
+        // Map DOM viewport coordinates to screenshot pixel coordinates
+        let x1 = Math.floor(r.left * scaleX);
+        let y1 = Math.floor(r.top * scaleY);
+        let x2 = Math.ceil((r.left + r.width) * scaleX);
+        let y2 = Math.ceil((r.top + r.height) * scaleY);
+
+        // Clamp coordinates to screenshot boundaries
+        x1 = Math.max(0, Math.min(x1, imgWidth));
+        y1 = Math.max(0, Math.min(y1, imgHeight));
+        x2 = Math.max(0, Math.min(x2, imgWidth));
+        y2 = Math.max(0, Math.min(y2, imgHeight));
+
+        const rw = x2 - x1;
+        const rh = y2 - y1;
+
+        if (rw <= 0 || rh <= 0) return;
+
+        // Draw opaque dark slate mask
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(x1, y1, rw, rh);
+
+        // Draw category badge over redacted rectangle
+        ctx.fillStyle = '#ef4444';
+        const fontSize = Math.max(10, Math.round(12 * scaleY));
+        ctx.font = `bold ${fontSize}px sans-serif`;
+        const tagText = `🔒 ${item.category}`;
+        ctx.fillText(tagText, x1 + 4, y1 + Math.max(fontSize, 14));
+
+        mappedBoundingBoxes.push({
+          category: item.category,
+          bbox: [x1, y1, x2, y2]
+        });
+      });
+
+      // 6. Export sanitized screenshot URL
+      const redactedDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+
+      // Update UI elements
+      if (imgRedactedScreenshot) imgRedactedScreenshot.src = redactedDataUrl;
+      if (valOriginalDimensions) valOriginalDimensions.textContent = `${imgWidth} × ${imgHeight}`;
+      if (valViewportDimensions) valViewportDimensions.textContent = `${vpWidth} × ${vpHeight}`;
+      if (valDPR) valDPR.textContent = dpr.toFixed(2);
+      if (valScaleFactors) valScaleFactors.textContent = `${scaleX.toFixed(2)} / ${scaleY.toFixed(2)}`;
+      if (valSensitiveRegionCount) valSensitiveRegionCount.textContent = String(mappedBoundingBoxes.length);
+      if (valRedactionStatus) valRedactionStatus.textContent = 'Redacted Locally';
+
+      if (listRedactedRegions) {
+        if (mappedBoundingBoxes.length > 0) {
+          listRedactedRegions.innerHTML = mappedBoundingBoxes.map(b => `
+            <div class="item-row" style="display: flex; justify-content: space-between; align-items: center; padding: 4px 6px; border-bottom: 1px solid var(--border-color); font-size: 10px;">
+              <span class="privacy-tag sensitive" style="font-size: 9px;">🔒 ${escapeHtml(b.category)}</span>
+              <span style="font-family: monospace; color: var(--accent-blue); font-size: 9px;">[${b.bbox.join(',')}]</span>
+            </div>
+          `).join('');
+        } else {
+          listRedactedRegions.innerHTML = '<span class="empty-text">No sensitive regions found to redact.</span>';
+        }
+      }
+
+      if (boxRedactionResult) boxRedactionResult.classList.remove('hidden');
+      setStatus(`✓ Visual privacy redaction complete (${mappedBoundingBoxes.length} region(s) masked locally).`, 'success');
+      logActivity(`Visual privacy redaction complete (${mappedBoundingBoxes.length} region(s) masked | Scale: ${scaleX.toFixed(2)}x, ${scaleY.toFixed(2)}y | DPR: ${dpr}).`, 'success');
+    };
+
+    img.onerror = () => {
+      setStatus('Failed to process screenshot image for visual redaction.', 'error');
+      logActivity('Failed to process screenshot image for visual redaction.', 'error');
+    };
+
+    img.src = screenshotDataUrl;
+  }
+
+  if (btnRedactVisuals) {
+    btnRedactVisuals.addEventListener('click', handleRedactVisualPrivacy);
+  }
+
   // Initialize
   populateProfileForm();
   handleScanPage();

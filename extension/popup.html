@@ -149,6 +149,35 @@
           </div>
         </div>
       </section>
+
+      <!-- PHASE 5C: LOCAL VISUAL PRIVACY REDACTION -->
+      <section class="section card">
+        <div class="section-title">🔐 Local Visual Privacy Redaction</div>
+        <button id="btnRedactVisuals" class="btn btn-action btn-block">
+          🔐 Redact Sensitive Visuals
+        </button>
+
+        <div id="boxRedactionResult" class="redaction-box hidden" style="margin-top: 8px;">
+          <div class="redaction-meta-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 10px; margin-bottom: 6px; background: var(--bg-primary); padding: 6px; border-radius: 4px; border: 1px solid var(--border-color);">
+            <div>Original: <strong id="valOriginalDimensions" style="color: var(--accent-blue);">0 × 0</strong></div>
+            <div>Viewport: <strong id="valViewportDimensions" style="color: var(--accent-indigo);">0 × 0</strong></div>
+            <div>DPR: <strong id="valDPR" style="color: var(--text-muted);">1.0</strong></div>
+            <div>Scale: <strong id="valScaleFactors" style="color: var(--accent-amber);">1.0 / 1.0</strong></div>
+            <div>Sensitive: <strong id="valSensitiveRegionCount" style="color: var(--accent-rose);">0</strong></div>
+            <div>Status: <strong id="valRedactionStatus" style="color: var(--accent-emerald);">Redacted Locally</strong></div>
+          </div>
+
+          <div class="section-title" style="font-size: 10px; margin-bottom: 4px;">Sanitized / Redacted Screenshot:</div>
+          <div class="screenshot-img-container">
+            <img id="imgRedactedScreenshot" src="" alt="Redacted Screenshot" class="screenshot-img" />
+          </div>
+
+          <div class="section-title" style="font-size: 10px; margin-top: 8px; margin-bottom: 4px;">Redacted Sensitive Regions:</div>
+          <div id="listRedactedRegions" class="item-list" style="max-height: 120px; overflow-y: auto;">
+            <span class="empty-text">No sensitive regions redacted yet.</span>
+          </div>
+        </div>
+      </section>
     </main>
 
     <!-- TAB 2: PRIVACY ENGINE -->
